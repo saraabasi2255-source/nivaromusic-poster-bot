@@ -16,7 +16,7 @@ database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
 MAIN_BOT_USERNAME = "NivaroMusic_bot"
 # آیدی عددی تلگرام خودت — فقط همین آیدی اجازه داره با بات حرف بزنه
 # (با @userinfobot پیدا کن)
-OWNER_ID = "8606397223,5055650124"
+
 
 # متغیرهای محرمانه (اینا رو با wrangler secret put ست کن، نه اینجا):
 # POSTER_BOT_TOKEN
