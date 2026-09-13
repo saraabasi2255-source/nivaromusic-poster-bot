@@ -333,25 +333,17 @@ async function publishToChannel(env, chatId, pending, linkId) {
     return;
   }
 
-  const sentMessageId = data.result.message_id;
-
-  await env.DB.prepare(
-    `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-     ON CONFLICT(message_id) DO UPDATE SET
-       chat_id = excluded.chat_id,
-       title = excluded.title,
-       performer = excluded.performer,
-       file_name = excluded.file_name,
-       caption = excluded.caption,
-       duration = excluded.duration`
-  )
-    .bind(channelId, sentMessageId, pending.title, pending.performer, pending.file_name, caption, pending.duration)
-    .run();
+  // ⚠️ عمداً هیچی توی جدول songs ثبت نمی‌کنیم — فقط بات اصلی (وقتی همین
+  // آهنگ رو توی کانال آرشیو هم بذاری) مسئولِ ذخیره‌سازی توی دیتابیسه.
+  // این بات فقط پستِ ظاهری رو توی کانال می‌ذاره.
 
   await deletePending(env, pending.admin_id);
 
-  await sendMessage(env, chatId, "✅ توی کانال پست شد.");
+  await sendMessage(
+    env,
+    chatId,
+    "✅ توی کانال پست شد.\n\n⚠️ یادت نره همین آهنگ رو توی کانال آرشیو هم بذاری تا قابل جستجو بشه."
+  );
 }
 
 async function createSearchLink(env, query) {
