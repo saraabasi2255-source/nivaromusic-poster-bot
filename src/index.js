@@ -492,7 +492,11 @@ async function deletePending(env, userId) {
 
 function isOwner(env, userId) {
   if (!userId) return false;
-  return String(userId) === String(env.OWNER_ID || "").trim();
+  const ids = String(env.OWNER_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.includes(String(userId));
 }
 
 function buildCaption(title, performer) {
