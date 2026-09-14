@@ -23,8 +23,13 @@ CREATE TABLE IF NOT EXISTS pending_posts (
 CREATE TABLE IF NOT EXISTS search_links (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   query TEXT,
+  performer TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- اگه search_links رو قبلا (بدون ستون performer) ساخته بودی، این خط رو
+-- یک‌بار جدا اجرا کن (اگه از قبل بود، خطا می‌ده، بی‌خیالش شو):
+-- ALTER TABLE search_links ADD COLUMN performer TEXT;
 
 -- اگه pending_posts رو قبلا با نسخه‌ی قدیمی‌تر این پروژه ساخته بودی و
 -- ستون‌های زیر رو نداره، این خطا رو نادیده بگیر (یعنی از قبل درست بوده).
