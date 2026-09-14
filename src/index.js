@@ -242,9 +242,18 @@ async function sendFinalPreview(env, chatId, userId, pending) {
     return;
   }
 
+  // به‌جای خودِ عنوان کامل (که ممکنه «Sped Up»، «Slowed» و... داشته باشه و
+  // باعث بشه نسخه‌های دیگه‌ی همین آهنگ که این کلمات رو ندارن پیدا نشن)،
+  // اول اسمِ «اصلی» آهنگ رو در میاریم و همراه با اسم خواننده ذخیره می‌کنیم.
+  // این‌طوری هر نسخه‌ای از همین آهنگ (چه اسمش توصیف داشته باشه چه نداشته
+  // باشه) پیدا می‌شه، ولی چون اسم خواننده هم شرطه، به آهنگ‌های دیگه سرایت
+  // نمی‌کنه.
+  const coreTitle = extractCoreTitle(pending.title);
+  const searchQuery = [coreTitle, pending.performer].filter(Boolean).join(" ").trim();
+
   // یه ردیف توی search_links می‌سازیم که فقط شماره‌ش (نه خودِ متن فارسی)
   // توی لینکِ دکمه بره — چون لینک‌های تلگرام فقط حروف/عدد انگلیسی قبول می‌کنن
-  const linkId = await createSearchLink(env, pending.title);
+  const linkId = await createSearchLink(env, searchQuery, pending.performer);
 
   const caption = buildCaption(pending.title, pending.performer);
   const deepLink = `https://t.me/${botUsername}?start=q_${linkId}`;
@@ -346,9 +355,61 @@ async function publishToChannel(env, chatId, pending, linkId) {
   );
 }
 
-async function createSearchLink(env, query) {
-  const res = await env.DB.prepare(`INSERT INTO search_links (query) VALUES (?1)`)
-    .bind(query || "")
+// کلماتی که معمولا فقط «نوعِ نسخه» رو نشون می‌دن، نه خودِ اسم آهنگ رو —
+// حذفشون می‌کنیم تا نسخه‌های مختلف (اصلی/اسپید/اسلو/ریمیکس/...) همه زیر
+// یه کلید جستجوی مشترک قرار بگیرن
+const VERSION_DESCRIPTORS = new Set([
+  "slowed",
+  "reverb",
+  "sped",
+  "speed",
+  "up",
+  "nightcore",
+  "remix",
+  "cover",
+  "acoustic",
+  "live",
+  "instrumental",
+  "extended",
+  "bass",
+  "boosted",
+  "8d",
+  "lyrics",
+  "lyric",
+  "video",
+  "official",
+  "audio",
+  "hq",
+  "hd",
+  "clean",
+  "explicit",
+  "edit",
+  "mix",
+  "version",
+  "ver",
+  "slow",
+  "fast",
+  "deep",
+  "night",
+]);
+
+// اسمِ «اصلیِ» آهنگ رو در میاره: هرچی داخل پرانتز/براکت باشه (معمولا توضیح
+// نسخه‌ست) رو حذف می‌کنه، بعد کلمات توصیفیِ رایج بالا رو هم پاک می‌کنه
+function extractCoreTitle(title) {
+  if (!title) return "";
+  let t = title.replace(/[([{][^)\]}]*[)\]}]/g, " "); // محتوای پرانتز/براکت
+  const words = t.split(/\s+/).filter(Boolean);
+  const filtered = words.filter((w) => {
+    const lw = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return lw && !VERSION_DESCRIPTORS.has(lw);
+  });
+  const core = filtered.join(" ").trim();
+  return core || title; // اگه همه‌چی حذف شد (یعنی کل اسم توصیفی بود)، خودِ اصلی رو نگه دار
+}
+
+async function createSearchLink(env, query, performer) {
+  const res = await env.DB.prepare(`INSERT INTO search_links (query, performer) VALUES (?1, ?2)`)
+    .bind(query || "", performer || "")
     .run();
   return res.meta.last_row_id;
 }
