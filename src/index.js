@@ -480,17 +480,34 @@ async function handleChannelPost(msg, env) {
   if (!channelId || String(msg.chat.id) !== String(channelId)) return;
   if (!msg.audio) return; // فقط آهنگ‌ها رو فوروارد کن
 
-  const originalCaption = msg.caption || "";
-  const originalMarkup = msg.reply_markup || null;
+  try {
+    const originalCaption = msg.caption || "";
+    const originalMarkup = msg.reply_markup || null;
 
-  const stripped = await editMessageCaption(env, channelId, msg.message_id, "", originalMarkup);
-  if (!stripped) return; // اگه نتونستیم ویرایش کنیم (مثلا دسترسی نداریم)، اصلا فوروارد نکن
+    const stripResult = await editMessageCaption(env, channelId, msg.message_id, "", originalMarkup);
+    if (!stripResult.ok) {
+      // اگه نتونستیم کپشن رو ویرایش کنیم، احتمالا دسترسیِ «ویرایش پیام‌های
+      // دیگران» رو توی کانال نداریم — به مالک خبر بده تا ساکت گم نشه
+      for (const ownerId of getOwnerIds(env)) {
+        await sendMessage(
+          env,
+          ownerId,
+          `⚠️ نتونستم آهنگِ جدیدِ کانال رو فوروارد کنم.\nخطای تلگرام: ${stripResult.description || "نامشخص"}\n\nاحتمالا بات توی کانال دسترسیِ «Edit Messages of Others» رو نداره.`
+        );
+      }
+      return;
+    }
 
-  for (const ownerId of getOwnerIds(env)) {
-    await forwardMessage(env, ownerId, channelId, msg.message_id);
+    for (const ownerId of getOwnerIds(env)) {
+      await forwardMessage(env, ownerId, channelId, msg.message_id);
+    }
+
+    await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
+  } catch (e) {
+    for (const ownerId of getOwnerIds(env)) {
+      await sendMessage(env, ownerId, `⚠️ خطا توی فوروارد کردن آهنگِ کانال:\n${e.message || e}`);
+    }
   }
-
-  await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
 }
 
 function buildCaption(title, performer) {
@@ -538,9 +555,9 @@ async function editMessageCaption(env, chatId, messageId, caption, reply_markup)
   });
   try {
     const data = await res.json();
-    return !!data.ok;
+    return { ok: !!data.ok, description: data.description || "" };
   } catch {
-    return false;
+    return { ok: false, description: "پاسخ نامعتبر از تلگرام" };
   }
 }
 
