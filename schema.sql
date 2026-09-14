@@ -14,8 +14,18 @@ CREATE TABLE IF NOT EXISTS pending_posts (
   duration INTEGER,
   awaiting_field TEXT,
   status TEXT DEFAULT 'awaiting_confirm',
+  -- 'audio' (آهنگِ معمولی با کپشن+دکمه‌ی جستجو) یا 'voice' (ویس با
+  -- دکمه‌ی «دانلود آهنگ» که به یه لینکِ دلخواه وصله)
+  kind TEXT DEFAULT 'audio',
+  -- فقط برای kind='voice': لینکی که قراره زیر دکمه‌ی «دانلود آهنگ» بره
+  link TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- اگه pending_posts رو قبلا (بدون ستون‌های kind / link) ساخته بودی، این
+-- دو خط رو یک‌بار جدا اجرا کن (هرکدوم از قبل بود، خطا می‌ده، بی‌خیالش شو):
+-- ALTER TABLE pending_posts ADD COLUMN kind TEXT DEFAULT 'audio';
+-- ALTER TABLE pending_posts ADD COLUMN link TEXT;
 
 -- هر ردیف یعنی «وقتی روی این دکمه زدن، این کلمه رو براش سرچ کن».
 -- به‌جای گذاشتن مستقیمِ اسم آهنگ (که فارسیه و توی لینک تلگرام جا نمی‌شه)
