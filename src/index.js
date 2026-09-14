@@ -16,7 +16,7 @@
 // حالت عادی نشون می‌ده.
 
 // 👇👇 کپشن دلخواهت (فرمت خودت) — {title} و {performer} خودکار جایگزین می‌شن.
-const CAPTION_TEMPLATE = `NivaroMusic
+const CAPTION_TEMPLATE = `🎧NivaroMusic
 
 ◈ ━━━━━━━━━━━━ ◈
 ◈ Track : {title}
@@ -25,7 +25,7 @@ const CAPTION_TEMPLATE = `NivaroMusic
 
 ❝ Just close your eyes & feel it ❞
 
- @NivaroMusic`;
+ 🆔@NivaroMusic`;
 
 const SEARCH_BUTTON_TEXT = "🎧 جستجوی این آهنگ";
 
