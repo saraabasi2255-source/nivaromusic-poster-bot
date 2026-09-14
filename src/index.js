@@ -52,6 +52,13 @@ export default {
     }
 
     try {
+      // 🔍 تشخیصیِ موقت: ببینیم اصلا چه نوع آپدیتی می‌رسه (بعد از رفع مشکل حذفش می‌کنیم)
+      if (env.DEBUG_UPDATES === "1") {
+        for (const ownerId of getOwnerIds(env)) {
+          await sendMessage(env, ownerId, `🔍 آپدیت رسید: ${Object.keys(update).join(", ")}`);
+        }
+      }
+
       if (update.message) {
         await handleMessage(update.message, env);
       } else if (update.callback_query) {
@@ -82,16 +89,25 @@ async function handleMessage(msg, env) {
     await sendMessage(
       env,
       chatId,
-      "سلام 👋\nهر فایل صوتی که برام بفرستی رو با کپشن آماده می‌سازم، برات پیش‌نمایش می‌فرستم و فقط با تاییدِ خودت می‌ذارم توی کانال."
+      "سلام 👋\n🎵 فایل صوتی بفرستی: کپشن آماده می‌سازم و بعد از تاییدت می‌ذارم توی کانال.\n🎙 ویس بفرستی: ازت لینک دانلود می‌خوام و زیرش دکمه‌اش می‌کنم.\nهیچ‌کدوم بدون تاییدِ خودت پست نمی‌شه."
     );
     return;
   }
 
-  // اگه منتظر ویرایش دستیِ عنوان/خواننده هستیم، این پیام متنی همونه
+  // اگه منتظر ویرایش دستیِ عنوان/خواننده یا گرفتنِ لینکِ دانلود هستیم،
+  // این پیام متنی همونه
   if (msg.text) {
     const pending = await getPending(env, userId);
     if (pending && pending.awaiting_field) {
       const value = msg.text.trim();
+
+      if (pending.awaiting_field === "link") {
+        await setLink(env, userId, value);
+        await clearAwaitingField(env, userId);
+        await sendVoiceFinalPreview(env, chatId, userId);
+        return;
+      }
+
       await updatePendingField(env, userId, pending.awaiting_field, value);
       await clearAwaitingField(env, userId);
       await sendPreview(env, chatId, userId);
@@ -104,9 +120,50 @@ async function handleMessage(msg, env) {
     return;
   }
 
-  if (msg.text) {
-    await sendMessage(env, chatId, "یه فایل صوتی (audio) برام بفرست تا شروع کنیم 🎵");
+  if (msg.voice) {
+    await handleIncomingVoice(msg, env);
+    return;
   }
+
+  if (msg.text) {
+    await sendMessage(env, chatId, "یه فایل صوتی (audio) یا ویس بفرست تا شروع کنیم 🎵");
+  }
+}
+
+// ویس جدید رسید ⇒ توی pending_posts ذخیره‌ش کن و لینک دانلود رو ازش بپرس
+async function handleIncomingVoice(msg, env) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const voice = msg.voice;
+
+  const pending = await getPending(env, userId);
+  if (pending && pending.status === "awaiting_publish") {
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ یه پستِ قبلی هنوز منتظر تصمیم توئه (ارسال به کانال یا انصراف). اول اون رو جواب بده، بعد فایل جدید بفرست."
+    );
+    return;
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link)
+     VALUES (?1, ?2, NULL, NULL, NULL, ?3, 'link', 'awaiting_confirm', 'voice', NULL)
+     ON CONFLICT(admin_id) DO UPDATE SET
+       file_id = excluded.file_id,
+       file_name = NULL,
+       title = NULL,
+       performer = NULL,
+       duration = excluded.duration,
+       awaiting_field = 'link',
+       status = 'awaiting_confirm',
+       kind = 'voice',
+       link = NULL`
+  )
+    .bind(userId, voice.file_id, voice.duration || null)
+    .run();
+
+  await sendMessage(env, chatId, "🔗 لینک دانلود رو بفرست تا زیرِ ویس دکمه‌اش کنم:");
 }
 
 // فایل جدید رسید ⇒ توی pending_posts ذخیره‌ش کن و پیش‌نمایش کپشن رو نشون بده
@@ -129,8 +186,8 @@ async function handleIncomingAudio(msg, env) {
   const performer = audio.performer || "نامشخص";
 
   await env.DB.prepare(
-    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'awaiting_confirm')
+    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'awaiting_confirm', 'audio', NULL)
      ON CONFLICT(admin_id) DO UPDATE SET
        file_id = excluded.file_id,
        file_name = excluded.file_name,
@@ -138,7 +195,9 @@ async function handleIncomingAudio(msg, env) {
        performer = excluded.performer,
        duration = excluded.duration,
        awaiting_field = NULL,
-       status = 'awaiting_confirm'`
+       status = 'awaiting_confirm',
+       kind = 'audio',
+       link = NULL`
   )
     .bind(userId, audio.file_id, audio.file_name || null, title, performer, audio.duration || null)
     .run();
@@ -227,6 +286,12 @@ async function handleCallbackQuery(cq, env) {
     return;
   }
 
+  if (action === "vpublish") {
+    await answerCallbackQuery(env, cq.id);
+    await publishVoiceToChannel(env, chatId, pending);
+    return;
+  }
+
   await answerCallbackQuery(env, cq.id);
 }
 
@@ -296,6 +361,88 @@ async function sendFinalPreview(env, chatId, userId, pending) {
 
   await setStatus(env, userId, "awaiting_publish");
   await sendMessage(env, chatId, "این بالا دقیقا همون چیزیه که می‌خواد توی کانال پست بشه. ارسالش کنم؟");
+}
+
+// پیش‌نمایش نهاییِ ویس: خودِ ویس + دکمه‌ی شیشه‌ای «دانلود آهنگ» (با لینکی
+// که خودت دادی)، فقط برای خودِ کاربر، با دو دکمه‌ی ارسال به کانال/انصراف
+async function sendVoiceFinalPreview(env, chatId, userId) {
+  const pending = await getPending(env, userId);
+  if (!pending) return;
+
+  const body = {
+    chat_id: chatId,
+    voice: pending.file_id,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "⬇️ دانلود آهنگ", url: pending.link }],
+        [
+          { text: "📤 ارسال به کانال", callback_data: `vpublish:${userId}` },
+          { text: "❌ انصراف", callback_data: `pcancel:${userId}` },
+        ],
+      ],
+    },
+  };
+  if (pending.duration) body.duration = pending.duration;
+
+  const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendVoice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+
+  if (!data.ok) {
+    await sendMessage(
+      env,
+      chatId,
+      `❌ ساخت پیش‌نمایش با خطا مواجه شد:\n${data.description || "خطای نامشخص"}`
+    );
+    return;
+  }
+
+  await setStatus(env, userId, "awaiting_publish");
+  await sendMessage(env, chatId, "این بالا دقیقا همون چیزیه که می‌خواد توی کانال پست بشه. ارسالش کنم؟");
+}
+
+// وقتی روی «📤 ارسال به کانال» زدی (برای ویس): واقعاً می‌فرسته توی CHANNEL_ID
+async function publishVoiceToChannel(env, chatId, pending) {
+  const channelId = env.CHANNEL_ID;
+  if (!channelId) {
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ متغیر CHANNEL_ID تنظیم نشده؛ توی wrangler.toml (بخش [vars]) آیدی عددی کانال رو اضافه کن (بات باید ادمین کانال هم باشه)."
+    );
+    return;
+  }
+
+  const body = {
+    chat_id: channelId,
+    voice: pending.file_id,
+    reply_markup: {
+      inline_keyboard: [[{ text: "⬇️ دانلود آهنگ", url: pending.link }]],
+    },
+  };
+  if (pending.duration) body.duration = pending.duration;
+
+  const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendVoice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+
+  if (!data.ok) {
+    await sendMessage(
+      env,
+      chatId,
+      `❌ پست توی کانال با خطا مواجه شد:\n${data.description || "خطای نامشخص"}\n\n(مطمئن شو بات دوم رو توی کانال ادمین کردی)`
+    );
+    return;
+  }
+
+  await deletePending(env, pending.admin_id);
+  await sendMessage(env, chatId, "✅ توی کانال پست شد.");
 }
 
 // وقتی روی «📤 ارسال به کانال» زدی: واقعاً می‌فرسته توی CHANNEL_ID
@@ -431,6 +578,12 @@ async function updatePendingField(env, userId, field, value) {
     .run();
 }
 
+async function setLink(env, userId, link) {
+  await env.DB.prepare(`UPDATE pending_posts SET link = ?1 WHERE admin_id = ?2`)
+    .bind(link, userId)
+    .run();
+}
+
 async function setAwaitingField(env, userId, field) {
   await env.DB.prepare(`UPDATE pending_posts SET awaiting_field = ?1 WHERE admin_id = ?2`)
     .bind(field, userId)
@@ -478,7 +631,7 @@ function getOwnerIds(env) {
 async function handleChannelPost(msg, env) {
   const channelId = env.CHANNEL_ID;
   if (!channelId || String(msg.chat.id) !== String(channelId)) return;
-  if (!msg.audio) return; // فقط آهنگ‌ها رو فوروارد کن
+  if (!msg.audio && !msg.voice) return; // فقط آهنگ‌ها و ویس‌ها رو فوروارد کن
 
   try {
     const originalCaption = msg.caption || "";
