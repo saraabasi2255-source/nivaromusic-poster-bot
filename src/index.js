@@ -27,7 +27,7 @@ const CAPTION_TEMPLATE = `🎧NivaroMusic
 
  🆔@NivaroMusic`;
 
-const SEARCH_BUTTON_TEXT = "🎧 جستجوی این آهنگ";
+const SEARCH_BUTTON_TEXT = "All Version";
 
 export default {
   async fetch(request, env, ctx) {
