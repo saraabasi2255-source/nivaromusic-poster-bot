@@ -56,6 +56,8 @@ export default {
         await handleMessage(update.message, env);
       } else if (update.callback_query) {
         await handleCallbackQuery(update.callback_query, env);
+      } else if (update.channel_post) {
+        await handleChannelPost(update.channel_post, env);
       }
     } catch (e) {
       console.error("poster webhook error:", e);
@@ -455,11 +457,40 @@ async function deletePending(env, userId) {
 
 function isOwner(env, userId) {
   if (!userId) return false;
-  const ids = String(env.OWNER_ID || "")
+  return getOwnerIds(env).includes(String(userId));
+}
+
+function getOwnerIds(env) {
+  return String(env.OWNER_ID || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  return ids.includes(String(userId));
+}
+
+// ── هر آهنگی که توی کانال پست می‌شه (چه دستیِ ادمین‌ها، چه خودِ همین بات) ──
+//
+// تلگرام اجازه نمی‌ده «فوروارد واقعی» (با برچسب Forwarded from) کپشن
+// نداشته باشه — فوروارد همیشه کپشنِ اصلی رو هم با خودش میاره. برای دور زدنِ
+// این محدودیت: کپشنِ پستِ کانال رو یه لحظه خالی می‌کنیم، همون لحظه‌ی
+// بی‌کپشن رو فوروارد می‌کنیم (برای خودت، توی همین چت خصوصی)، و بلافاصله
+// کپشنِ اصلی رو روی پستِ کانال برمی‌گردونیم — طوری که بینندگانِ کانال هیچ
+// چیزی رو از دست نمی‌دن.
+async function handleChannelPost(msg, env) {
+  const channelId = env.CHANNEL_ID;
+  if (!channelId || String(msg.chat.id) !== String(channelId)) return;
+  if (!msg.audio) return; // فقط آهنگ‌ها رو فوروارد کن
+
+  const originalCaption = msg.caption || "";
+  const originalMarkup = msg.reply_markup || null;
+
+  const stripped = await editMessageCaption(env, channelId, msg.message_id, "", originalMarkup);
+  if (!stripped) return; // اگه نتونستیم ویرایش کنیم (مثلا دسترسی نداریم)، اصلا فوروارد نکن
+
+  for (const ownerId of getOwnerIds(env)) {
+    await forwardMessage(env, ownerId, channelId, msg.message_id);
+  }
+
+  await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
 }
 
 function buildCaption(title, performer) {
@@ -494,5 +525,29 @@ async function answerCallbackQuery(env, callbackQueryId, text) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+  });
+}
+
+// کپشنِ یه پیام رو ویرایش می‌کنه. reply_markup رو هم صریحاً دوباره پاس
+// می‌دیم که دکمه‌ی شیشه‌ای زیر آهنگ حین این عملیات پاک نشه.
+async function editMessageCaption(env, chatId, messageId, caption, reply_markup) {
+  const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/editMessageCaption`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId, caption, reply_markup }),
+  });
+  try {
+    const data = await res.json();
+    return !!data.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function forwardMessage(env, chatId, fromChatId, messageId) {
+  await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/forwardMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, from_chat_id: fromChatId, message_id: messageId }),
   });
 }
