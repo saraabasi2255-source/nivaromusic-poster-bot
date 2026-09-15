@@ -2,24 +2,18 @@ name = "nivaromusic-poster-bot"
 main = "src/index.js"
 compatibility_date = "2024-09-01"
 
-# 👇 همون D1 دیتابیسِ پروژه‌ی بات اصلی رو اینجا وصل کن (باید کاملا یکی باشه،
-# نه یه دیتابیس جدید) — database_id رو از wrangler.toml پروژه‌ی اول کپی کن
-# یا با `wrangler d1 list` پیداش کن.
+# همون D1 دیتابیسِ پروژه‌ی بات اصلی (دقیقاً همون id)
 [[d1_databases]]
 binding = "DB"
 database_name = "song_search_db"
-database_id = "PUT_SAME_DATABASE_ID_AS_MAIN_PROJECT_HERE"
+database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
 
-# متغیرهای غیرمحرمانه (اختیاری، می‌تونی همینجا هم بذاری یا با
-# `wrangler secret put` مخفی نگه‌شون داری):
 [vars]
-MAIN_BOT_USERNAME = "YourMainBotUsername"
-CHANNEL_ID = "PUT_NUMERIC_CHANNEL_ID_HERE"
-ADMIN_IDS = "PUT_YOUR_TELEGRAM_USER_ID_HERE"
-# چنل خصوصیِ سوم که آرشیوِ بی‌کپشنِ همه‌ی آهنگ‌ها (با برچسب Forwarded from)
-# توش نگه‌داری می‌شه — بات باید ادمینِ این چنل هم باشه
-PRIVATE_ARCHIVE_CHANNEL_ID = "PUT_NUMERIC_PRIVATE_CHANNEL_ID_HERE"
+MAIN_BOT_USERNAME = "NivaroMusic_bot"
 
-# متغیرهای محرمانه (اینا رو با wrangler secret put ست کن، نه اینجا):
+# این‌ها را اینجا ننویس — همه به صورت Secret/Variable در داشبورد ست شده‌اند:
 # POSTER_BOT_TOKEN
 # POSTER_WEBHOOK_SECRET
+# CHANNEL_ID
+# OWNER_ID
+# PRIVATE_ARCHIVE_CHANNEL_ID   (= -1003992241448)
