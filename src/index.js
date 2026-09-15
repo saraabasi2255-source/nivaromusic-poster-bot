@@ -663,7 +663,16 @@ async function handleChannelPost(msg, env) {
     }
 
     for (const targetId of getForwardTargets(env)) {
-      await forwardMessage(env, targetId, channelId, msg.message_id);
+      const fwResult = await forwardMessage(env, targetId, channelId, msg.message_id);
+      if (!fwResult.ok) {
+        for (const ownerId of getOwnerIds(env)) {
+          await sendMessage(
+            env,
+            ownerId,
+            `⚠️ فوروارد به ${targetId} با خطا مواجه شد:\n${fwResult.description || "نامشخص"}`
+          );
+        }
+      }
     }
 
     await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
@@ -726,9 +735,15 @@ async function editMessageCaption(env, chatId, messageId, caption, reply_markup)
 }
 
 async function forwardMessage(env, chatId, fromChatId, messageId) {
-  await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/forwardMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/forwardMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, from_chat_id: fromChatId, message_id: messageId }),
   });
+  try {
+    const data = await res.json();
+    return { ok: !!data.ok, description: data.description || "" };
+  } catch {
+    return { ok: false, description: "پاسخ نامعتبر از تلگرام" };
+  }
 }
