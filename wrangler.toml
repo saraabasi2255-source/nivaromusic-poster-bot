@@ -10,7 +10,7 @@ database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
 
 [vars]
 MAIN_BOT_USERNAME = "NivaroMusic_bot"
-
+CHANNEL_ID = -1003312274246
 # این‌ها را اینجا ننویس — همه به صورت Secret/Variable در داشبورد ست شده‌اند:
 # POSTER_BOT_TOKEN
 # POSTER_WEBHOOK_SECRET
