@@ -8,21 +8,17 @@ compatibility_date = "2024-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "song_search_db"
-database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
+database_id = "PUT_SAME_DATABASE_ID_AS_MAIN_PROJECT_HERE"
 
 # متغیرهای غیرمحرمانه (اختیاری، می‌تونی همینجا هم بذاری یا با
 # `wrangler secret put` مخفی نگه‌شون داری):
 [vars]
-MAIN_BOT_USERNAME = "NivaroMusic_bot"
-# آیدی عددیِ کانالی که می‌خوای بات توش پست کنه (بات باید ادمینِ اون کانال باشه،
-# با دسترسی «ارسال پیام»). این آیدی معمولا با یه علامت منفی شروع می‌شه،
-# مثلا "-1001234567890". برای پیدا کردنش می‌تونی یه پیام از کانال رو به
-# @userinfobot فوروارد کنی.
-CHANNEL_ID = "-1001234567890"
-# آیدی عددی تلگرام خودت — فقط همین آیدی(ها) اجازه دارن با بات حرف بزنن
-# (با @userinfobot پیدا کن). اگه چند نفرن، با کاما جدا کن، بدون فاصله یا با فاصله فرقی نداره:
-# OWNER_ID = "8606397223,5055650124"
-OWNER_ID = "8606397223,5055650124"
+MAIN_BOT_USERNAME = "YourMainBotUsername"
+CHANNEL_ID = "PUT_NUMERIC_CHANNEL_ID_HERE"
+ADMIN_IDS = "PUT_YOUR_TELEGRAM_USER_ID_HERE"
+# چنل خصوصیِ سوم که آرشیوِ بی‌کپشنِ همه‌ی آهنگ‌ها (با برچسب Forwarded from)
+# توش نگه‌داری می‌شه — بات باید ادمینِ این چنل هم باشه
+PRIVATE_ARCHIVE_CHANNEL_ID = "PUT_NUMERIC_PRIVATE_CHANNEL_ID_HERE"
 
 # متغیرهای محرمانه (اینا رو با wrangler secret put ست کن، نه اینجا):
 # POSTER_BOT_TOKEN

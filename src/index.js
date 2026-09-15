@@ -620,14 +620,25 @@ function getOwnerIds(env) {
     .filter(Boolean);
 }
 
+// چنل خصوصیِ سومی که آرشیوِ بی‌کپشنِ همه‌ی آهنگ‌ها (با برچسبِ Forwarded from
+// چنل اصلی) توش نگه‌داری می‌شه — علاوه بر ownerها، همینجا هم فوروارد می‌شه
+function getForwardTargets(env) {
+  const targets = [...getOwnerIds(env)];
+  if (env.PRIVATE_ARCHIVE_CHANNEL_ID) {
+    targets.push(String(env.PRIVATE_ARCHIVE_CHANNEL_ID));
+  }
+  return targets;
+}
+
 // ── هر آهنگی که توی کانال پست می‌شه (چه دستیِ ادمین‌ها، چه خودِ همین بات) ──
 //
 // تلگرام اجازه نمی‌ده «فوروارد واقعی» (با برچسب Forwarded from) کپشن
 // نداشته باشه — فوروارد همیشه کپشنِ اصلی رو هم با خودش میاره. برای دور زدنِ
 // این محدودیت: کپشنِ پستِ کانال رو یه لحظه خالی می‌کنیم، همون لحظه‌ی
-// بی‌کپشن رو فوروارد می‌کنیم (برای خودت، توی همین چت خصوصی)، و بلافاصله
-// کپشنِ اصلی رو روی پستِ کانال برمی‌گردونیم — طوری که بینندگانِ کانال هیچ
-// چیزی رو از دست نمی‌دن.
+// بی‌کپشن رو فوروارد می‌کنیم (برای هر owner، و برای چنل خصوصیِ سوم اگه
+// PRIVATE_ARCHIVE_CHANNEL_ID ست شده باشه)، و بلافاصله کپشنِ اصلی رو روی
+// پستِ کانال برمی‌گردونیم — طوری که بینندگانِ کانال هیچ چیزی رو از دست
+// نمی‌دن.
 async function handleChannelPost(msg, env) {
   const channelId = env.CHANNEL_ID;
   if (!channelId || String(msg.chat.id) !== String(channelId)) return;
@@ -651,8 +662,8 @@ async function handleChannelPost(msg, env) {
       return;
     }
 
-    for (const ownerId of getOwnerIds(env)) {
-      await forwardMessage(env, ownerId, channelId, msg.message_id);
+    for (const targetId of getForwardTargets(env)) {
+      await forwardMessage(env, targetId, channelId, msg.message_id);
     }
 
     await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
