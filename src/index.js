@@ -632,53 +632,47 @@ function getForwardTargets(env) {
 
 // ── هر آهنگی که توی کانال پست می‌شه (چه دستیِ ادمین‌ها، چه خودِ همین بات) ──
 //
-// تلگرام اجازه نمی‌ده «فوروارد واقعی» (با برچسب Forwarded from) کپشن
-// نداشته باشه — فوروارد همیشه کپشنِ اصلی رو هم با خودش میاره. برای دور زدنِ
-// این محدودیت: کپشنِ پستِ کانال رو یه لحظه خالی می‌کنیم، همون لحظه‌ی
-// بی‌کپشن رو فوروارد می‌کنیم (برای هر owner، و برای چنل خصوصیِ سوم اگه
-// PRIVATE_ARCHIVE_CHANNEL_ID ست شده باشه)، و بلافاصله کپشنِ اصلی رو روی
-// پستِ کانال برمی‌گردونیم — طوری که بینندگانِ کانال هیچ چیزی رو از دست
-// نمی‌دن.
+// روشِ ساده و مطمئن: پیام رو همونطور که هست (با کپشن) به هر target فوروارد
+// می‌کنیم (فوروارد واقعی، با برچسبِ Forwarded from)، و بعد فقط کپشنِ همون
+// نسخه‌ی فوروارد‌شده (که خودِ بات صاحبشه، توی چتِ مقصد) رو خالی می‌کنیم.
+// این کار به پستِ اصلیِ توی کانال دست نمی‌زنه، پس نه فلیکر داره و نه به
+// دسترسیِ «Edit Messages of Others» روی کانال اصلی نیاز داره.
 async function handleChannelPost(msg, env) {
   const channelId = env.CHANNEL_ID;
   if (!channelId || String(msg.chat.id) !== String(channelId)) return;
   if (!msg.audio && !msg.voice) return; // فقط آهنگ‌ها و ویس‌ها رو فوروارد کن
 
-  try {
-    const originalCaption = msg.caption || "";
-    const originalMarkup = msg.reply_markup || null;
-
-    const stripResult = await editMessageCaption(env, channelId, msg.message_id, "", originalMarkup);
-    if (!stripResult.ok) {
-      // اگه نتونستیم کپشن رو ویرایش کنیم، احتمالا دسترسیِ «ویرایش پیام‌های
-      // دیگران» رو توی کانال نداریم — به مالک خبر بده تا ساکت گم نشه
-      for (const ownerId of getOwnerIds(env)) {
-        await sendMessage(
-          env,
-          ownerId,
-          `⚠️ نتونستم آهنگِ جدیدِ کانال رو فوروارد کنم.\nخطای تلگرام: ${stripResult.description || "نامشخص"}\n\nاحتمالا بات توی کانال دسترسیِ «Edit Messages of Others» رو نداره.`
-        );
-      }
-      return;
-    }
-
-    for (const targetId of getForwardTargets(env)) {
+  for (const targetId of getForwardTargets(env)) {
+    try {
       const fwResult = await forwardMessage(env, targetId, channelId, msg.message_id);
       if (!fwResult.ok) {
         for (const ownerId of getOwnerIds(env)) {
           await sendMessage(
             env,
             ownerId,
-            `⚠️ فوروارد به ${targetId} با خطا مواجه شد:\n${fwResult.description || "نامشخص"}`
+            `⚠️ فوروارد به ${targetId} با خطا مواجه شد:\n${fwResult.description || "نامشخص"}\n\nاحتمالا بات توی اون چت ادمین نیست یا دسترسیِ «Post Messages» رو نداره.`
           );
         }
+        continue;
       }
-    }
 
-    await editMessageCaption(env, channelId, msg.message_id, originalCaption, originalMarkup);
-  } catch (e) {
-    for (const ownerId of getOwnerIds(env)) {
-      await sendMessage(env, ownerId, `⚠️ خطا توی فوروارد کردن آهنگِ کانال:\n${e.message || e}`);
+      const forwardedMessageId = fwResult.result && fwResult.result.message_id;
+      if (forwardedMessageId) {
+        const stripResult = await editMessageCaption(env, targetId, forwardedMessageId, "", null);
+        if (!stripResult.ok) {
+          for (const ownerId of getOwnerIds(env)) {
+            await sendMessage(
+              env,
+              ownerId,
+              `⚠️ فوروارد به ${targetId} انجام شد ولی نتونستم کپشنش رو پاک کنم:\n${stripResult.description || "نامشخص"}`
+            );
+          }
+        }
+      }
+    } catch (e) {
+      for (const ownerId of getOwnerIds(env)) {
+        await sendMessage(env, ownerId, `⚠️ خطا توی فوروارد کردن آهنگِ کانال به ${targetId}:\n${e.message || e}`);
+      }
     }
   }
 }
@@ -742,8 +736,8 @@ async function forwardMessage(env, chatId, fromChatId, messageId) {
   });
   try {
     const data = await res.json();
-    return { ok: !!data.ok, description: data.description || "" };
+    return { ok: !!data.ok, description: data.description || "", result: data.result || null };
   } catch {
-    return { ok: false, description: "پاسخ نامعتبر از تلگرام" };
+    return { ok: false, description: "پاسخ نامعتبر از تلگرام", result: null };
   }
 }
