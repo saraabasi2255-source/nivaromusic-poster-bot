@@ -2,7 +2,7 @@ name = "nivaromusic-poster-bot"
 main = "src/index.js"
 compatibility_date = "2024-09-01"
 
-# همون D1 دیتابیسِ پروژه‌ی بات اصلی (دقیقاً همون id)
+# همون D1 دیتابیسِ پروژه‌ی بات اصلی (دقیقاً همون id) — آرشیو فانک
 [[d1_databases]]
 binding = "DB"
 database_name = "song_search_db"
