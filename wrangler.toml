@@ -2,25 +2,18 @@ name = "nivaromusic-poster-bot"
 main = "src/index.js"
 compatibility_date = "2024-09-01"
 
-# ── دیتابیس‌ها ──────────────────────────────────────────────
-# هر دو دیتابیسِ بات اصلی رو وصل می‌کنیم تا بات دستیار بتونه
-# هم آهنگ‌های فانک و هم انگلیسی رو ببینه و پست کنه.
-
+# همون D1 دیتابیسِ پروژه‌ی بات اصلی (دقیقاً همون id) — آرشیو فانک
 [[d1_databases]]
 binding = "DB"
 database_name = "song_search_db"
 database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
 
-[[d1_databases]]
-binding = "DB_EN"
-database_name = "song_search_db_en"
-database_id = "5fcbbe67-b9b1-411b-8a74-d10f96c887fc"
-
-# ── متغیرهای غیرمحرمانه ─────────────────────────────────────
 [vars]
 MAIN_BOT_USERNAME = "NivaroMusic_bot"
 CHANNEL_ID = -1003312274246
-# چنل‌ها رو تو wrangler.toml نمی‌ذاریم چون تو Secret داریم:
+# این‌ها را اینجا ننویس — همه به صورت Secret/Variable در داشبورد ست شده‌اند:
+# POSTER_BOT_TOKEN
+# POSTER_WEBHOOK_SECRET
 # CHANNEL_ID
 # OWNER_ID
-# PRIVATE_ARCHIVE_CHANNEL_ID
+# PRIVATE_ARCHIVE_CHANNEL_ID   (= -1003992241448)

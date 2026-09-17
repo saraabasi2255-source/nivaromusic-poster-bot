@@ -1,71 +1,80 @@
-// بات دستیار پست‌گذاریِ NivaroMusic
+// بات دستیار پست‌گذاریِ NivaroMusic — پروژه‌ی کاملا جدا (Worker مستقل)
 //
-// این بات تو چت خصوصی، فایل صوتی می‌گیره، کپشن می‌سازه، اختیاری دمو می‌گیره،
-// و بعد از تاییدِ خودت:
-//   - آهنگ رو تو «چنل اصلی» (env.CHANNEL_ID) پست می‌کنه
-//   - رکورد رو تو دیتابیس مربوطه (فانک = env.DB یا انگلیسی = env.DB_EN) ذخیره می‌کنه
-//   - دکمه‌ی شیشه‌ای می‌سازه که کاربر رو می‌بره تو بات اصلی برای گرفتن همون آهنگ
+// این پروژه هیچ ربطی به ریپو/بات اصلی نداره: توکن جدا، ریپوی گیت‌هاب جدا،
+// دیپلوی جدا. تنها چیزی که با بات اصلی مشترکه، همون دیتابیس D1 هست.
 //
-// دو دیتابیس:
-//   env.DB    → song_search_db    (فانک)
-//   env.DB_EN → song_search_db_en (انگلیسی)
+// کارش: توی چت خصوصی (فقط برای OWNER_ID خودت) یه فایل صوتی می‌گیره، کپشن رو
+// طبق CAPTION_TEMPLATE پایین همین فایل می‌سازه، بعد به‌عنوان پیش‌نمایشِ
+// نهایی (دقیقا همون‌طوری که قراره توی کانال دیده بشه) برات می‌فرسته و
+// می‌پرسه «این رو توی کانال پست کنم یا نه». فقط با تاییدِ خودت (دکمه‌ی
+// «📤 ارسال به کانال») واقعاً توی CHANNEL_ID پست می‌شه؛ اگه بزنی «❌ انصراف»
+// هیچ‌جا پست نمی‌شه.
+//
+// دکمه‌ی شیشه‌ای زیر آهنگ: با کلیک روش، کاربر می‌ره توی بات اصلی
+// (MAIN_BOT_USERNAME) و همونجا خودکار اسم آهنگ براش سرچ می‌شه (دقیقا مثل
+// اینکه خودش اسم آهنگ رو تایپ کرده باشه) و بات اصلی لیست نتایج رو مثل
+// حالت عادی نشون می‌ده.
 
+// 👇👇 کپشن دلخواهت (فرمت خودت) — {title} و {performer} خودکار جایگزین می‌شن.
 const CAPTION_TEMPLATE = `🎧NivaroMusic
 
 ◈ ━━━━━━━━━━━━ ◈
-◈ Name: {title}
-◈ Artist: {performer}
-◈ Tracks: {tracks}
+◈ Track : {title}
+◈ Artist : {performer}
 ◈ ━━━━━━━━━━━━ ◈
 
 ❝ Just close your eyes & feel it ❞
 
  🆔@NivaroMusic`;
 
-const SEARCH_BUTTON_TEXT = "🎧 دریافت نسخه‌ی کامل";
-const DEMO_BUTTON_TEXT = "🎧 دریافت نسخه‌ی کامل";
+const SEARCH_BUTTON_TEXT = "All Version";
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
     if (request.method !== "POST" || url.pathname !== "/webhook") {
-      return new Response("ok");
+      return new Response("ok"); // مسیر/متد دیگه‌ای نیست، چیزی برای انجام دادن نداریم
     }
+
     if (env.POSTER_WEBHOOK_SECRET) {
       const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
       if (secret !== env.POSTER_WEBHOOK_SECRET) {
         return new Response("forbidden", { status: 403 });
       }
     }
+
     let update;
     try {
       update = await request.json();
     } catch {
       return new Response("bad request", { status: 400 });
     }
+
     try {
-      if (update.message) await handleMessage(update.message, env);
-      else if (update.callback_query) await handleCallbackQuery(update.callback_query, env);
-      else if (update.channel_post) await handleChannelPost(update.channel_post, env);
+      // 🔍 تشخیصیِ موقت: ببینیم اصلا چه نوع آپدیتی می‌رسه (بعد از رفع مشکل حذفش می‌کنیم)
+      if (env.DEBUG_UPDATES === "1") {
+        for (const ownerId of getOwnerIds(env)) {
+          await sendMessage(env, ownerId, `🔍 آپدیت رسید: ${Object.keys(update).join(", ")}`);
+        }
+      }
+
+      if (update.message) {
+        await handleMessage(update.message, env);
+      } else if (update.callback_query) {
+        await handleCallbackQuery(update.callback_query, env);
+      } else if (update.channel_post) {
+        await handleChannelPost(update.channel_post, env);
+      }
     } catch (e) {
       console.error("poster webhook error:", e);
     }
+
     return new Response("ok");
   },
 };
 
-// ── مسیریابی دیتابیس بر اساس src ─────────────────────────────
-// "f" = فانک (env.DB)، "e" = انگلیسی (env.DB_EN)
-function dbBySrc(env, src) {
-  return src === "e" ? env.DB_EN : env.DB;
-}
-
-// پست همیشه تو «چنل اصلی» انجام می‌شه
-function channelBySrc(env, src) {
-  return env.CHANNEL_ID;
-}
-
-// ── پیام‌های خصوصی ───────────────────────────────────────────
+// ── پیام‌های خصوصی به بات دستیار ──────────────────────────────
 
 async function handleMessage(msg, env) {
   const chatId = msg.chat.id;
@@ -77,31 +86,33 @@ async function handleMessage(msg, env) {
   }
 
   if (msg.text?.startsWith("/start")) {
-    await sendMainMenu(env, chatId);
+    await sendMessage(
+      env,
+      chatId,
+      "سلام 👋\n🎵 فایل صوتی بفرستی: کپشن آماده می‌سازم و بعد از تاییدت می‌ذارم توی کانال.\n🎙 ویس بفرستی: ازت لینک دانلود می‌خوام و زیرش دکمه‌اش می‌کنم.\nهیچ‌کدوم بدون تاییدِ خودت پست نمی‌شه."
+    );
     return;
   }
 
-  // پیام متنی (ویرایش یا لینک قدیمی)
+  // اگه منتظر ویرایش دستیِ عنوان/خواننده یا گرفتنِ لینکِ دانلود هستیم،
+  // این پیام متنی همونه
   if (msg.text) {
-    const pending = await getPendingAny(env, userId);
-    if (pending && pending.awaiting_field && !pending.awaiting_field.startsWith("src:")) {
+    const pending = await getPending(env, userId);
+    if (pending && pending.awaiting_field) {
       const value = msg.text.trim();
-      // حالت awaiting_field = "link" یا "link:src:X"
-      if (pending.awaiting_field === "link" || pending.awaiting_field.startsWith("link:")) {
-        await setLink(env, pending.__db, userId, value);
-        await clearAwaitingField(env, pending.__db, userId);
+
+      if (pending.awaiting_field === "link") {
+        await setLink(env, userId, value);
+        await clearAwaitingField(env, userId);
         await sendVoiceFinalPreview(env, chatId, userId);
         return;
       }
-      // حالت ویرایش title یا performer
-      const fieldName = pending.awaiting_field.split(":")[0];
-      await updatePendingField(env, pending.__db, userId, fieldName, value);
-      await clearAwaitingField(env, pending.__db, userId);
-      await sendPreview(env, chatId, userId, pending.src || "f");
+
+      await updatePendingField(env, userId, pending.awaiting_field, value);
+      await clearAwaitingField(env, userId);
+      await sendPreview(env, chatId, userId);
       return;
     }
-    await sendMainMenu(env, chatId);
-    return;
   }
 
   if (msg.audio) {
@@ -110,150 +121,106 @@ async function handleMessage(msg, env) {
   }
 
   if (msg.voice) {
-    const pending = await getPendingAny(env, userId);
-    if (pending && pending.status === "awaiting_demo") {
-      await handleIncomingDemo(msg, env, pending);
-    } else {
-      await handleIncomingVoice(msg, env);
-    }
+    await handleIncomingVoice(msg, env);
     return;
   }
 
-  await sendMessage(env, chatId, "یه فایل صوتی (audio) یا ویس بفرست 🎵");
+  if (msg.text) {
+    await sendMessage(env, chatId, "یه فایل صوتی (audio) یا ویس بفرست تا شروع کنیم 🎵");
+  }
 }
 
-async function sendMainMenu(env, chatId) {
-  await sendMessage(env, chatId, "سلام 👋\nچیکار کنم؟", {
-    inline_keyboard: [
-      [{ text: "🎵 تک‌آهنگ فانک (با دمو)", callback_data: "flow:single:f" }],
-      [{ text: "🎵 تک‌آهنگ انگلیسی (با دمو)", callback_data: "flow:single:e" }],
-      [{ text: "🎧 آهنگ فانک (نسخه‌ها)", callback_data: "flow:normal:f" }],
-      [{ text: "🎧 آهنگ انگلیسی (نسخه‌ها)", callback_data: "flow:normal:e" }],
-    ],
-  });
+// ویس جدید رسید ⇒ توی pending_posts ذخیره‌ش کن و لینک دانلود رو ازش بپرس
+async function handleIncomingVoice(msg, env) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const voice = msg.voice;
+
+  const pending = await getPending(env, userId);
+  if (pending && pending.status === "awaiting_publish") {
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ یه پستِ قبلی هنوز منتظر تصمیم توئه (ارسال به کانال یا انصراف). اول اون رو جواب بده، بعد فایل جدید بفرست."
+    );
+    return;
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link)
+     VALUES (?1, ?2, NULL, NULL, NULL, ?3, 'link', 'awaiting_confirm', 'voice', NULL)
+     ON CONFLICT(admin_id) DO UPDATE SET
+       file_id = excluded.file_id,
+       file_name = NULL,
+       title = NULL,
+       performer = NULL,
+       duration = excluded.duration,
+       awaiting_field = 'link',
+       status = 'awaiting_confirm',
+       kind = 'voice',
+       link = NULL`
+  )
+    .bind(userId, voice.file_id, voice.duration || null)
+    .run();
+
+  await sendMessage(env, chatId, "🔗 لینک دانلود رو بفرست تا زیرِ ویس دکمه‌اش کنم:");
 }
 
-// ── فایل صوتی ────────────────────────────────────────────────
-
+// فایل جدید رسید ⇒ توی pending_posts ذخیره‌ش کن و پیش‌نمایش کپشن رو نشون بده
 async function handleIncomingAudio(msg, env) {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const audio = msg.audio;
 
-  const pending = await getPendingAny(env, userId);
+  const pending = await getPending(env, userId);
   if (pending && pending.status === "awaiting_publish") {
-    await sendMessage(env, chatId, "⚠️ یه پستِ قبلی هنوز منتظر تصمیم توئه. اول اون رو جواب بده.");
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ یه پستِ قبلی هنوز منتظر تصمیم توئه (ارسال به کانال یا انصراف). اول اون رو جواب بده، بعد فایل جدید بفرست."
+    );
     return;
   }
 
   const title = audio.title || stripExtension(audio.file_name) || "بدون عنوان";
   const performer = audio.performer || "نامشخص";
 
-  // از pending قبلی، src و kind رو نگه دار
-  const src = pending?.src || "f";
-  const kind = pending?.kind === "single" ? "single" : "audio";
-  const db = dbBySrc(env, src);
-
-  await db.prepare(
-    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link, demo_file_id, demo_duration)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'awaiting_confirm', ?8, NULL, NULL, NULL)
+  await env.DB.prepare(
+    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'awaiting_confirm', 'audio', NULL)
      ON CONFLICT(admin_id) DO UPDATE SET
        file_id = excluded.file_id,
        file_name = excluded.file_name,
        title = excluded.title,
        performer = excluded.performer,
        duration = excluded.duration,
-       awaiting_field = excluded.awaiting_field,
+       awaiting_field = NULL,
        status = 'awaiting_confirm',
-       kind = excluded.kind,
-       link = NULL,
-       demo_file_id = NULL,
-       demo_duration = NULL`
+       kind = 'audio',
+       link = NULL`
   )
-    .bind(
-      userId,
-      audio.file_id,
-      audio.file_name || null,
-      title,
-      performer,
-      audio.duration || null,
-      `src:${src}`,
-      kind
-    )
+    .bind(userId, audio.file_id, audio.file_name || null, title, performer, audio.duration || null)
     .run();
 
-  await sendPreview(env, chatId, userId, src);
+  await sendPreview(env, chatId, userId);
 }
 
-// ── دمو ──────────────────────────────────────────────────────
-
-async function handleIncomingDemo(msg, env, pending) {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const voice = msg.voice;
-  const src = pending.src || "f";
-  const db = dbBySrc(env, src);
-
-  await db.prepare(
-    `UPDATE pending_posts
-     SET demo_file_id = ?1, demo_duration = ?2, status = 'awaiting_publish'
-     WHERE admin_id = ?3`
-  )
-    .bind(voice.file_id, voice.duration || null, userId)
-    .run();
-
-  const updated = await getPendingAny(env, userId);
-  await sendDemoFinalPreview(env, chatId, userId, updated);
-}
-
-// ── ویس قدیمی ────────────────────────────────────────────────
-
-async function handleIncomingVoice(msg, env) {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const voice = msg.voice;
-
-  const pending = await getPendingAny(env, userId);
-  if (pending && pending.status === "awaiting_publish") {
-    await sendMessage(env, chatId, "⚠️ یه پستِ قبلی هنوز منتظر تصمیم توئه.");
-    return;
-  }
-
-  const src = pending?.src || "f";
-  const db = dbBySrc(env, src);
-
-  await db.prepare(
-    `INSERT INTO pending_posts (admin_id, file_id, file_name, title, performer, duration, awaiting_field, status, kind, link, demo_file_id, demo_duration)
-     VALUES (?1, ?2, NULL, NULL, NULL, ?3, ?4, 'awaiting_confirm', 'voice', NULL, NULL, NULL)
-     ON CONFLICT(admin_id) DO UPDATE SET
-       file_id = excluded.file_id, file_name = NULL, title = NULL, performer = NULL,
-       duration = excluded.duration, awaiting_field = excluded.awaiting_field,
-       status = 'awaiting_confirm', kind = 'voice', link = NULL,
-       demo_file_id = NULL, demo_duration = NULL`
-  )
-    .bind(userId, voice.file_id, voice.duration || null, `link:src:${src}`)
-    .run();
-
-  await sendMessage(env, chatId, "🔗 لینک دانلود رو بفرست تا زیرِ ویس دکمه‌اش کنم:");
-}
-
-// ── پیش‌نمایش کپشن ────────────────────────────────────────────
-
-async function sendPreview(env, chatId, userId, src) {
-  const pending = await getPendingAny(env, userId);
+// پیش‌نمایش کپشنِ ساخته‌شده + دکمه‌های تایید/ویرایش/انصراف
+async function sendPreview(env, chatId, userId) {
+  const pending = await getPending(env, userId);
   if (!pending) return;
 
-  const caption = buildCaption(pending.title, pending.performer, pending.kind);
-  const text = `پیش‌نمایش کپشن (دیتابیس: ${src === "e" ? "انگلیسی" : "فانک"}):\n\n${caption}\n\nهمه‌چی درسته؟`;
+  const caption = buildCaption(pending.title, pending.performer);
+  const text = `پیش‌نمایش کپشن:\n\n${caption}\n\nهمه‌چی درسته؟`;
 
   const reply_markup = {
     inline_keyboard: [
-      [{ text: "✅ تایید و ادامه", callback_data: `pconfirm:${userId}:${src}` }],
+      [{ text: "✅ تایید و ساخت پست نهایی", callback_data: `pconfirm:${userId}` }],
       [
-        { text: "✏️ ویرایش عنوان", callback_data: `pedit_t:${userId}:${src}` },
-        { text: "✏️ ویرایش خواننده", callback_data: `pedit_p:${userId}:${src}` },
+        { text: "✏️ ویرایش عنوان", callback_data: `pedit_t:${userId}` },
+        { text: "✏️ ویرایش خواننده", callback_data: `pedit_p:${userId}` },
       ],
-      [{ text: "❌ انصراف", callback_data: `pcancel:${userId}:${src}` }],
+      [{ text: "❌ انصراف", callback_data: `pcancel:${userId}` }],
     ],
   };
 
@@ -269,130 +236,97 @@ async function handleCallbackQuery(cq, env) {
   const parts = data.split(":");
   const action = parts[0];
   const ownerId = Number(parts[1]);
-  const src = parts[2] || "f";
 
   if (!chatId || !isOwner(env, userId)) {
     await answerCallbackQuery(env, cq.id, "⛔️ اجازه نداری.");
     return;
   }
-  if (ownerId && ownerId !== userId) {
+
+  // امنیت: فقط خودِ کسی که این پست رو شروع کرده می‌تونه دکمه‌هاشو بزنه
+  if (ownerId !== userId) {
     await answerCallbackQuery(env, cq.id, "این پیام مال تو نیست.");
     return;
   }
 
-  // شروع فلوی «تک‌آهنگ»
-  if (action === "flow" && parts[1] === "single") {
-    await answerCallbackQuery(env, cq.id);
-    const db = dbBySrc(env, src);
-    await db.prepare(
-      `INSERT INTO pending_posts (admin_id, status, kind, file_id, title, performer, demo_file_id, demo_duration, awaiting_field, link)
-       VALUES (?1, 'awaiting_full', 'single', NULL, NULL, NULL, NULL, NULL, NULL, NULL)
-       ON CONFLICT(admin_id) DO UPDATE SET
-         file_id = NULL, title = NULL, performer = NULL,
-         demo_file_id = NULL, demo_duration = NULL,
-         status = 'awaiting_full', kind = 'single',
-         awaiting_field = NULL, link = NULL`
-    )
-      .bind(userId)
-      .run();
-    await sendMessage(env, chatId, `🎵 آهنگ کامل رو بفرست (دیتابیس: ${src === "e" ? "انگلیسی" : "فانک"}) (audio):`);
-    return;
-  }
-
-  // شروع فلوی «عادی»
-  if (action === "flow" && parts[1] === "normal") {
-    await answerCallbackQuery(env, cq.id);
-    const db = dbBySrc(env, src);
-    await db.prepare(
-      `INSERT INTO pending_posts (admin_id, status, kind, file_id, title, performer, demo_file_id, demo_duration, awaiting_field, link)
-       VALUES (?1, 'awaiting_full', 'audio', NULL, NULL, NULL, NULL, NULL, NULL, NULL)
-       ON CONFLICT(admin_id) DO UPDATE SET
-         file_id = NULL, title = NULL, performer = NULL,
-         demo_file_id = NULL, demo_duration = NULL,
-         status = 'awaiting_full', kind = 'audio',
-         awaiting_field = NULL, link = NULL`
-    )
-      .bind(userId)
-      .run();
-    await sendMessage(env, chatId, `🎧 آهنگ رو بفرست (دیتابیس: ${src === "e" ? "انگلیسی" : "فانک"}) (audio):`);
-    return;
-  }
-
-  const pending = await getPendingAny(env, userId);
+  const pending = await getPending(env, userId);
   if (!pending) {
-    await answerCallbackQuery(env, cq.id, "چیزی برای ادامه نیست.");
+    await answerCallbackQuery(env, cq.id, "چیزی برای ادامه پیدا نشد. یه فایل جدید بفرست.");
     return;
   }
-  const db = dbBySrc(env, src);
 
   if (action === "pcancel") {
-    await deletePending(env, db, userId);
+    await deletePending(env, userId);
     await answerCallbackQuery(env, cq.id, "لغو شد.");
-    await sendMessage(env, chatId, "❌ لغو شد.");
+    await sendMessage(env, chatId, "❌ لغو شد. هیچ‌جا پست نشد.");
     return;
   }
 
   if (action === "pedit_t" || action === "pedit_p") {
     const field = action === "pedit_t" ? "title" : "performer";
-    await setAwaitingField(env, db, userId, field);
+    await setAwaitingField(env, userId, field);
     await answerCallbackQuery(env, cq.id);
-    await sendMessage(env, chatId, field === "title" ? "اسم جدید آهنگ:" : "اسم جدید خواننده:");
+    await sendMessage(
+      env,
+      chatId,
+      field === "title" ? "اسم جدید آهنگ رو بفرست:" : "اسم جدید خواننده رو بفرست:"
+    );
     return;
   }
 
   if (action === "pconfirm") {
     await answerCallbackQuery(env, cq.id);
-    if (pending.kind === "single") {
-      await db.prepare(`UPDATE pending_posts SET status = 'awaiting_demo' WHERE admin_id = ?1`)
-        .bind(userId)
-        .run();
-      await sendMessage(env, chatId, "✅ کپشن تایید شد.\nحالا دمو رو بفرست (فقط voice):");
-      return;
-    }
-    await sendFinalPreview(env, chatId, userId, pending, src);
+    await sendFinalPreview(env, chatId, userId, pending);
     return;
   }
 
   if (action === "ppublish") {
+    const linkId = Number(parts[2]);
     await answerCallbackQuery(env, cq.id);
-    await publishToChannel(env, chatId, pending, src);
+    await publishToChannel(env, chatId, pending, linkId);
     return;
   }
 
   if (action === "vpublish") {
     await answerCallbackQuery(env, cq.id);
-    await publishVoiceToChannel(env, chatId, pending, src);
-    return;
-  }
-
-  if (action === "dpublish") {
-    await answerCallbackQuery(env, cq.id);
-    await publishDemoToChannel(env, chatId, pending, src);
+    await publishVoiceToChannel(env, chatId, pending);
     return;
   }
 
   await answerCallbackQuery(env, cq.id);
 }
 
-// ── پیش‌نمایش نهایی (عادی) ───────────────────────────────────
-
-async function sendFinalPreview(env, chatId, userId, pending, src) {
+// پیش‌نمایش نهایی: دقیقا همون چیزی که قراره توی کانال دیده بشه (فایل صوتی +
+// کپشن کامل + دکمه‌ی شیشه‌ای جستجو)، ولی فقط برای خودِ کاربر (توی همین
+// چت خصوصی) با دو تا دکمه‌ی «ارسال به کانال» / «انصراف» زیرش
+async function sendFinalPreview(env, chatId, userId, pending) {
   const botUsername = env.MAIN_BOT_USERNAME;
   if (!botUsername) {
-    await sendMessage(env, chatId, "⚠️ MAIN_BOT_USERNAME تنظیم نشده");
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ متغیر MAIN_BOT_USERNAME تنظیم نشده؛ توی wrangler.toml (بخش [vars]) اضافه‌ش کن."
+    );
     return;
   }
 
-  const db = dbBySrc(env, src);
+  // به‌جای خودِ عنوان کامل (که ممکنه «Sped Up»، «Slowed» و... داشته باشه و
+  // باعث بشه نسخه‌های دیگه‌ی همین آهنگ که این کلمات رو ندارن پیدا نشن)،
+  // اول اسمِ «اصلی» آهنگ رو در میاریم و همراه با اسم خواننده ذخیره می‌کنیم.
+  // این‌طوری هر نسخه‌ای از همین آهنگ (چه اسمش توصیف داشته باشه چه نداشته
+  // باشه) پیدا می‌شه، ولی چون اسم خواننده هم شرطه، به آهنگ‌های دیگه سرایت
+  // نمی‌کنه.
   const coreTitle = extractCoreTitle(pending.title);
   const searchQuery = [coreTitle, pending.performer].filter(Boolean).join(" ").trim();
-  const linkId = await createSearchLink(env, db, searchQuery, pending.performer);
 
-  const caption = buildCaption(pending.title, pending.performer, pending.kind);
+  // یه ردیف توی search_links می‌سازیم که فقط شماره‌ش (نه خودِ متن فارسی)
+  // توی لینکِ دکمه بره — چون لینک‌های تلگرام فقط حروف/عدد انگلیسی قبول می‌کنن
+  const linkId = await createSearchLink(env, searchQuery, pending.performer);
+
+  const caption = buildCaption(pending.title, pending.performer);
   const deepLink = `https://t.me/${botUsername}?start=q_${linkId}`;
 
   const body = {
-    chat_id: chatId,
+    chat_id: chatId, // فقط پیش‌نمایش، برای خودِ کاربر
     audio: pending.file_id,
     caption,
     title: pending.title,
@@ -401,8 +335,8 @@ async function sendFinalPreview(env, chatId, userId, pending, src) {
       inline_keyboard: [
         [{ text: SEARCH_BUTTON_TEXT, url: deepLink }],
         [
-          { text: "📤 ارسال به کانال", callback_data: `ppublish:${userId}:${src}` },
-          { text: "❌ انصراف", callback_data: `pcancel:${userId}:${src}` },
+          { text: "📤 ارسال به کانال", callback_data: `ppublish:${userId}:${linkId}` },
+          { text: "❌ انصراف", callback_data: `pcancel:${userId}` },
         ],
       ],
     },
@@ -415,90 +349,25 @@ async function sendFinalPreview(env, chatId, userId, pending, src) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
+
   if (!data.ok) {
-    await sendMessage(env, chatId, `❌ خطا: ${data.description || "نامشخص"}`);
+    await sendMessage(
+      env,
+      chatId,
+      `❌ ساخت پیش‌نمایش با خطا مواجه شد:\n${data.description || "خطای نامشخص"}`
+    );
     return;
   }
 
-  await setStatus(env, db, userId, "awaiting_publish");
-  await sendMessage(env, chatId, "ارسالش کنم؟");
+  await setStatus(env, userId, "awaiting_publish");
+  await sendMessage(env, chatId, "این بالا دقیقا همون چیزیه که می‌خواد توی کانال پست بشه. ارسالش کنم؟");
 }
 
-// ── پیش‌نمایش نهایی (تک‌آهنگ) ─────────────────────────────────
-
-async function sendDemoFinalPreview(env, chatId, userId, pending) {
-  if (!pending) return;
-
-  const botUsername = env.MAIN_BOT_USERNAME;
-  if (!botUsername) {
-    await sendMessage(env, chatId, "⚠️ MAIN_BOT_USERNAME تنظیم نشده");
-    return;
-  }
-
-  const src = pending.src || "f";
-  const db = dbBySrc(env, src);
-  const coreTitle = extractCoreTitle(pending.title);
-  const searchQuery = [coreTitle, pending.performer].filter(Boolean).join(" ").trim();
-  const linkId = await createSearchLink(env, db, searchQuery, pending.performer);
-  const deepLink = `https://t.me/${botUsername}?start=q_${linkId}`;
-
-  // ۱) آهنگ کامل
-  const audioCaption = buildCaption(pending.title, pending.performer, pending.kind);
-  await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendAudio`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      audio: pending.file_id,
-      caption: audioCaption,
-      title: pending.title,
-      performer: pending.performer,
-      duration: pending.duration || undefined,
-    }),
-  });
-
-  // ۲) دمو با دکمه
-  const demoCaption =
-    `🎬 ${pending.title} - ${pending.performer}\n\n` +
-    `🎧 برای دریافت نسخه‌ی کامل دکمه‌ی زیر رو بزن 👇`;
-
-  const body = {
-    chat_id: chatId,
-    voice: pending.demo_file_id,
-    caption: demoCaption,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: DEMO_BUTTON_TEXT, url: deepLink }],
-        [
-          { text: "📤 ارسال به کانال", callback_data: `dpublish:${userId}:${src}` },
-          { text: "❌ انصراف", callback_data: `pcancel:${userId}:${src}` },
-        ],
-      ],
-    },
-  };
-  if (pending.demo_duration) body.duration = pending.demo_duration;
-
-  const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendVoice`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) {
-    await sendMessage(env, chatId, `❌ خطا: ${data.description || "نامشخص"}`);
-    return;
-  }
-
-  await setStatus(env, db, userId, "awaiting_publish");
-  await sendMessage(env, chatId, "ارسالش کنم؟");
-}
-
-// ── پیش‌نمایش نهایی ویس ──────────────────────────────────────
-
+// پیش‌نمایش نهاییِ ویس: خودِ ویس + دکمه‌ی شیشه‌ای «دانلود آهنگ» (با لینکی
+// که خودت دادی)، فقط برای خودِ کاربر، با دو دکمه‌ی ارسال به کانال/انصراف
 async function sendVoiceFinalPreview(env, chatId, userId) {
-  const pending = await getPendingAny(env, userId);
+  const pending = await getPending(env, userId);
   if (!pending) return;
-  const src = pending.src || "f";
 
   const body = {
     chat_id: chatId,
@@ -507,8 +376,8 @@ async function sendVoiceFinalPreview(env, chatId, userId) {
       inline_keyboard: [
         [{ text: "⬇️ دانلود آهنگ", url: pending.link }],
         [
-          { text: "📤 ارسال به کانال", callback_data: `vpublish:${userId}:${src}` },
-          { text: "❌ انصراف", callback_data: `pcancel:${userId}:${src}` },
+          { text: "📤 ارسال به کانال", callback_data: `vpublish:${userId}` },
+          { text: "❌ انصراف", callback_data: `pcancel:${userId}` },
         ],
       ],
     },
@@ -521,29 +390,38 @@ async function sendVoiceFinalPreview(env, chatId, userId) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
+
   if (!data.ok) {
-    await sendMessage(env, chatId, `❌ خطا: ${data.description || "نامشخص"}`);
+    await sendMessage(
+      env,
+      chatId,
+      `❌ ساخت پیش‌نمایش با خطا مواجه شد:\n${data.description || "خطای نامشخص"}`
+    );
     return;
   }
 
-  const db = dbBySrc(env, src);
-  await setStatus(env, db, userId, "awaiting_publish");
-  await sendMessage(env, chatId, "ارسالش کنم؟");
+  await setStatus(env, userId, "awaiting_publish");
+  await sendMessage(env, chatId, "این بالا دقیقا همون چیزیه که می‌خواد توی کانال پست بشه. ارسالش کنم؟");
 }
 
-// ── ارسال به کانال (ویس) ─────────────────────────────────────
-
-async function publishVoiceToChannel(env, chatId, pending, src) {
-  const channelId = channelBySrc(env, src);
+// وقتی روی «📤 ارسال به کانال» زدی (برای ویس): واقعاً می‌فرسته توی CHANNEL_ID
+async function publishVoiceToChannel(env, chatId, pending) {
+  const channelId = env.CHANNEL_ID;
   if (!channelId) {
-    await sendMessage(env, chatId, "⚠️ CHANNEL_ID تنظیم نشده");
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ متغیر CHANNEL_ID تنظیم نشده؛ توی wrangler.toml (بخش [vars]) آیدی عددی کانال رو اضافه کن (بات باید ادمین کانال هم باشه)."
+    );
     return;
   }
 
   const body = {
     chat_id: channelId,
     voice: pending.file_id,
-    reply_markup: { inline_keyboard: [[{ text: "⬇️ دانلود آهنگ", url: pending.link }]] },
+    reply_markup: {
+      inline_keyboard: [[{ text: "⬇️ دانلود آهنگ", url: pending.link }]],
+    },
   };
   if (pending.duration) body.duration = pending.duration;
 
@@ -553,32 +431,36 @@ async function publishVoiceToChannel(env, chatId, pending, src) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
+
   if (!data.ok) {
-    await sendMessage(env, chatId, `❌ خطا: ${data.description || "نامشخص"}`);
+    await sendMessage(
+      env,
+      chatId,
+      `❌ پست توی کانال با خطا مواجه شد:\n${data.description || "خطای نامشخص"}\n\n(مطمئن شو بات دوم رو توی کانال ادمین کردی)`
+    );
     return;
   }
 
-  const db = dbBySrc(env, src);
-  await deletePending(env, db, pending.admin_id);
+  await deletePending(env, pending.admin_id);
   await sendMessage(env, chatId, "✅ توی کانال پست شد.");
 }
 
-// ── ارسال به کانال (عادی) ────────────────────────────────────
-
-async function publishToChannel(env, chatId, pending, src) {
-  const channelId = channelBySrc(env, src);
+// وقتی روی «📤 ارسال به کانال» زدی: واقعاً می‌فرسته توی CHANNEL_ID
+// و توی جدول songs هم ثبتش می‌کنه (تا بات اصلی هم بشناستش)
+async function publishToChannel(env, chatId, pending, linkId) {
+  const channelId = env.CHANNEL_ID;
   const botUsername = env.MAIN_BOT_USERNAME;
-  const db = dbBySrc(env, src);
 
   if (!channelId) {
-    await sendMessage(env, chatId, "⚠️ CHANNEL_ID تنظیم نشده");
+    await sendMessage(
+      env,
+      chatId,
+      "⚠️ متغیر CHANNEL_ID تنظیم نشده؛ توی wrangler.toml (بخش [vars]) آیدی عددی کانال رو اضافه کن (بات باید ادمین کانال هم باشه)."
+    );
     return;
   }
 
-  const coreTitle = extractCoreTitle(pending.title);
-  const searchQuery = [coreTitle, pending.performer].filter(Boolean).join(" ").trim();
-  const linkId = await createSearchLink(env, db, searchQuery, pending.performer);
-  const caption = buildCaption(pending.title, pending.performer, pending.kind);
+  const caption = buildCaption(pending.title, pending.performer);
   const deepLink = `https://t.me/${botUsername}?start=q_${linkId}`;
 
   const body = {
@@ -599,208 +481,132 @@ async function publishToChannel(env, chatId, pending, src) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
+
   if (!data.ok) {
-    await sendMessage(env, chatId, `❌ خطا: ${data.description || "نامشخص"}`);
+    await sendMessage(
+      env,
+      chatId,
+      `❌ پست توی کانال با خطا مواجه شد:\n${data.description || "خطای نامشخص"}\n\n(مطمئن شو بات دوم رو توی کانال ادمین کردی)`
+    );
     return;
   }
 
-  // ثبت تو دیتابیس مربوطه
-  await db.prepare(
-    `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration, group_id)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
-     ON CONFLICT(message_id) DO UPDATE SET
-       chat_id = excluded.chat_id, title = excluded.title,
-       performer = excluded.performer, file_name = excluded.file_name,
-       caption = excluded.caption, duration = excluded.duration`
-  )
-    .bind(channelId, data.result.message_id, pending.title, pending.performer, pending.file_name, caption, pending.duration)
-    .run();
+  // ⚠️ عمداً هیچی توی جدول songs ثبت نمی‌کنیم — فقط بات اصلی (وقتی همین
+  // آهنگ رو توی کانال آرشیو هم بذاری) مسئولِ ذخیره‌سازی توی دیتابیسه.
+  // این بات فقط پستِ ظاهری رو توی کانال می‌ذاره.
 
-  await deletePending(env, db, pending.admin_id);
-  await sendMessage(env, chatId, "✅ آهنگ تو کانال پست و تو دیتابیس ذخیره شد.");
+  await deletePending(env, pending.admin_id);
+
+  await sendMessage(
+    env,
+    chatId,
+    "✅ توی کانال پست شد.\n\n⚠️ یادت نره همین آهنگ رو توی کانال آرشیو هم بذاری تا قابل جستجو بشه."
+  );
 }
 
-// ── ارسال به کانال (تک‌آهنگ + دمو) ───────────────────────────
-
-async function publishDemoToChannel(env, chatId, pending, src) {
-  const channelId = channelBySrc(env, src);
-  const botUsername = env.MAIN_BOT_USERNAME;
-  const db = dbBySrc(env, src);
-
-  if (!channelId || !botUsername) {
-    await sendMessage(env, chatId, "⚠️ CHANNEL_ID یا MAIN_BOT_USERNAME تنظیم نشده");
-    return;
-  }
-
-  const coreTitle = extractCoreTitle(pending.title);
-  const searchQuery = [coreTitle, pending.performer].filter(Boolean).join(" ").trim();
-  const linkId = await createSearchLink(env, db, searchQuery, pending.performer);
-  const deepLink = `https://t.me/${botUsername}?start=q_${linkId}`;
-
-  // ۱) آهنگ کامل
-  const audioCaption = buildCaption(pending.title, pending.performer, pending.kind);
-  const audioRes = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendAudio`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: channelId,
-      audio: pending.file_id,
-      caption: audioCaption,
-      title: pending.title,
-      performer: pending.performer,
-      duration: pending.duration || undefined,
-    }),
-  });
-  const audioData = await audioRes.json();
-  if (!audioData.ok) {
-    await sendMessage(env, chatId, `❌ خطا در پست آهنگ: ${audioData.description}`);
-    return;
-  }
-
-  // ۲) دمو با دکمه
-  const demoCaption =
-    `🎬 ${pending.title} - ${pending.performer}\n\n` +
-    `🎧 برای دریافت نسخه‌ی کامل دکمه‌ی زیر رو بزن 👇`;
-
-  const voiceRes = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/sendVoice`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: channelId,
-      voice: pending.demo_file_id,
-      caption: demoCaption,
-      duration: pending.demo_duration || undefined,
-      reply_markup: { inline_keyboard: [[{ text: DEMO_BUTTON_TEXT, url: deepLink }]] },
-    }),
-  });
-  const voiceData = await voiceRes.json();
-  if (!voiceData.ok) {
-    await sendMessage(env, chatId, `❌ خطا در پست دمو: ${voiceData.description}`);
-    return;
-  }
-
-  // ۳) ثبت آهنگ کامل تو دیتابیس مربوطه
-  await db.prepare(
-    `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration, group_id)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
-     ON CONFLICT(message_id) DO UPDATE SET
-       chat_id = excluded.chat_id, title = excluded.title,
-       performer = excluded.performer, file_name = excluded.file_name,
-       caption = excluded.caption, duration = excluded.duration`
-  )
-    .bind(channelId, audioData.result.message_id, pending.title, pending.performer, pending.file_name, audioCaption, pending.duration)
-    .run();
-
-  await deletePending(env, db, pending.admin_id);
-  await sendMessage(env, chatId, "✅ آهنگ + دمو تو کانال پست و تو دیتابیس ذخیره شد.");
-}
-
-// ── کمکی: عنوان اصلی ─────────────────────────────────────────
-
+// کلماتی که معمولا فقط «نوعِ نسخه» رو نشون می‌دن، نه خودِ اسم آهنگ رو —
+// حذفشون می‌کنیم تا نسخه‌های مختلف (اصلی/اسپید/اسلو/ریمیکس/...) همه زیر
+// یه کلید جستجوی مشترک قرار بگیرن
 const VERSION_DESCRIPTORS = new Set([
-  "slowed", "reverb", "sped", "speed", "up", "nightcore", "remix",
-  "cover", "acoustic", "live", "instrumental", "extended", "bass",
-  "boosted", "8d", "lyrics", "lyric", "video", "official", "audio",
-  "hq", "hd", "clean", "explicit", "edit", "mix", "version", "ver",
-  "slow", "fast", "deep", "night",
+  "slowed",
+  "reverb",
+  "sped",
+  "speed",
+  "up",
+  "nightcore",
+  "remix",
+  "cover",
+  "acoustic",
+  "live",
+  "instrumental",
+  "extended",
+  "bass",
+  "boosted",
+  "8d",
+  "lyrics",
+  "lyric",
+  "video",
+  "official",
+  "audio",
+  "hq",
+  "hd",
+  "clean",
+  "explicit",
+  "edit",
+  "mix",
+  "version",
+  "ver",
+  "slow",
+  "fast",
+  "deep",
+  "night",
 ]);
 
+// اسمِ «اصلیِ» آهنگ رو در میاره: هرچی داخل پرانتز/براکت باشه (معمولا توضیح
+// نسخه‌ست) رو حذف می‌کنه، بعد کلمات توصیفیِ رایج بالا رو هم پاک می‌کنه
 function extractCoreTitle(title) {
   if (!title) return "";
-  let t = title.replace(/[([{][^)\]}]*[)\]}]/g, " ");
+  let t = title.replace(/[([{][^)\]}]*[)\]}]/g, " "); // محتوای پرانتز/براکت
   const words = t.split(/\s+/).filter(Boolean);
   const filtered = words.filter((w) => {
     const lw = w.toLowerCase().replace(/[^a-z0-9]/g, "");
     return lw && !VERSION_DESCRIPTORS.has(lw);
   });
   const core = filtered.join(" ").trim();
-  return core || title;
+  return core || title; // اگه همه‌چی حذف شد (یعنی کل اسم توصیفی بود)، خودِ اصلی رو نگه دار
 }
 
-async function createSearchLink(env, db, query, performer) {
-  const res = await db.prepare(
-    `INSERT INTO search_links (query, performer) VALUES (?1, ?2)`
-  )
+async function createSearchLink(env, query, performer) {
+  const res = await env.DB.prepare(`INSERT INTO search_links (query, performer) VALUES (?1, ?2)`)
     .bind(query || "", performer || "")
     .run();
   return res.meta.last_row_id;
 }
 
-// ── دسترسی به pending_posts (تو هر دو دیتابیس) ────────────────
+// ── دسترسی به pending_posts ────────────────────────────────────
 
-async function getPendingAny(env, userId) {
-  // اول تو دیتابیس فانک
-  const p1 = await env.DB.prepare(`SELECT * FROM pending_posts WHERE admin_id = ?1`)
+async function getPending(env, userId) {
+  return await env.DB.prepare(`SELECT * FROM pending_posts WHERE admin_id = ?1`)
     .bind(userId)
     .first();
-  if (p1) {
-    p1.__db = env.DB;
-    p1.src = extractSrc(p1.awaiting_field) || "f";
-    return p1;
-  }
-  // بعد تو انگلیسی
-  if (env.DB_EN) {
-    const p2 = await env.DB_EN.prepare(`SELECT * FROM pending_posts WHERE admin_id = ?1`)
-      .bind(userId)
-      .first();
-    if (p2) {
-      p2.__db = env.DB_EN;
-      p2.src = extractSrc(p2.awaiting_field) || "e";
-      return p2;
-    }
-  }
-  return null;
 }
 
-function extractSrc(awaitingField) {
-  if (!awaitingField) return null;
-  if (awaitingField.startsWith("src:")) return awaitingField.slice(4);
-  const idx = awaitingField.indexOf(":src:");
-  if (idx >= 0) return awaitingField.slice(idx + 5);
-  return null;
-}
-
-async function updatePendingField(env, db, userId, field, value) {
+async function updatePendingField(env, userId, field, value) {
   const col = field === "title" ? "title" : "performer";
-  await db.prepare(`UPDATE pending_posts SET ${col} = ?1 WHERE admin_id = ?2`)
+  await env.DB.prepare(`UPDATE pending_posts SET ${col} = ?1 WHERE admin_id = ?2`)
     .bind(value, userId)
     .run();
 }
 
-async function setLink(env, db, userId, link) {
-  await db.prepare(`UPDATE pending_posts SET link = ?1 WHERE admin_id = ?2`)
+async function setLink(env, userId, link) {
+  await env.DB.prepare(`UPDATE pending_posts SET link = ?1 WHERE admin_id = ?2`)
     .bind(link, userId)
     .run();
 }
 
-async function setAwaitingField(env, db, userId, field) {
-  // src رو نگه دار
-  const current = await db.prepare(`SELECT awaiting_field FROM pending_posts WHERE admin_id = ?1`)
-    .bind(userId)
-    .first();
-  const src = extractSrc(current?.awaiting_field) || "f";
-  await db.prepare(`UPDATE pending_posts SET awaiting_field = ?1 WHERE admin_id = ?2`)
-    .bind(`${field}:src:${src}`, userId)
+async function setAwaitingField(env, userId, field) {
+  await env.DB.prepare(`UPDATE pending_posts SET awaiting_field = ?1 WHERE admin_id = ?2`)
+    .bind(field, userId)
     .run();
 }
 
-async function clearAwaitingField(env, db, userId) {
-  await db.prepare(`UPDATE pending_posts SET awaiting_field = NULL WHERE admin_id = ?1`)
+async function clearAwaitingField(env, userId) {
+  await env.DB.prepare(`UPDATE pending_posts SET awaiting_field = NULL WHERE admin_id = ?1`)
     .bind(userId)
     .run();
 }
 
-async function setStatus(env, db, userId, status) {
-  await db.prepare(`UPDATE pending_posts SET status = ?1 WHERE admin_id = ?2`)
+async function setStatus(env, userId, status) {
+  await env.DB.prepare(`UPDATE pending_posts SET status = ?1 WHERE admin_id = ?2`)
     .bind(status, userId)
     .run();
 }
 
-async function deletePending(env, db, userId) {
-  await db.prepare(`DELETE FROM pending_posts WHERE admin_id = ?1`).bind(userId).run();
+async function deletePending(env, userId) {
+  await env.DB.prepare(`DELETE FROM pending_posts WHERE admin_id = ?1`).bind(userId).run();
 }
 
-// ── کمکی: دسترسی ──────────────────────────────────────────────
+// ── کمکی ────────────────────────────────────────────────────────
 
 function isOwner(env, userId) {
   if (!userId) return false;
@@ -814,6 +620,8 @@ function getOwnerIds(env) {
     .filter(Boolean);
 }
 
+// چنل خصوصیِ سومی که آرشیوِ بی‌کپشنِ همه‌ی آهنگ‌ها (با برچسبِ Forwarded from
+// چنل اصلی) توش نگه‌داری می‌شه — علاوه بر ownerها، همینجا هم فوروارد می‌شه
 function getForwardTargets(env) {
   const targets = [...getOwnerIds(env)];
   if (env.PRIVATE_ARCHIVE_CHANNEL_ID) {
@@ -822,12 +630,17 @@ function getForwardTargets(env) {
   return targets;
 }
 
-// ── فوروارد خودکار پیام‌های چنل اصلی به owner و آرشیو خصوصی ──
-
+// ── هر آهنگی که توی کانال پست می‌شه (چه دستیِ ادمین‌ها، چه خودِ همین بات) ──
+//
+// روشِ ساده و مطمئن: پیام رو همونطور که هست (با کپشن) به هر target فوروارد
+// می‌کنیم (فوروارد واقعی، با برچسبِ Forwarded from)، و بعد فقط کپشنِ همون
+// نسخه‌ی فوروارد‌شده (که خودِ بات صاحبشه، توی چتِ مقصد) رو خالی می‌کنیم.
+// این کار به پستِ اصلیِ توی کانال دست نمی‌زنه، پس نه فلیکر داره و نه به
+// دسترسیِ «Edit Messages of Others» روی کانال اصلی نیاز داره.
 async function handleChannelPost(msg, env) {
   const channelId = env.CHANNEL_ID;
   if (!channelId || String(msg.chat.id) !== String(channelId)) return;
-  if (!msg.audio && !msg.voice) return;
+  if (!msg.audio && !msg.voice) return; // فقط آهنگ‌ها و ویس‌ها رو فوروارد کن
 
   for (const targetId of getForwardTargets(env)) {
     try {
@@ -837,11 +650,12 @@ async function handleChannelPost(msg, env) {
           await sendMessage(
             env,
             ownerId,
-            `⚠️ فوروارد به ${targetId} با خطا مواجه شد:\n${fwResult.description || "نامشخص"}`
+            `⚠️ فوروارد به ${targetId} با خطا مواجه شد:\n${fwResult.description || "نامشخص"}\n\nاحتمالا بات توی اون چت ادمین نیست یا دسترسیِ «Post Messages» رو نداره.`
           );
         }
         continue;
       }
+
       const forwardedMessageId = fwResult.result && fwResult.result.message_id;
       if (forwardedMessageId) {
         const stripResult = await editMessageCaption(env, targetId, forwardedMessageId, "", null);
@@ -857,22 +671,17 @@ async function handleChannelPost(msg, env) {
       }
     } catch (e) {
       for (const ownerId of getOwnerIds(env)) {
-        await sendMessage(env, ownerId, `⚠️ خطا توی فوروارد به ${targetId}:\n${e.message || e}`);
+        await sendMessage(env, ownerId, `⚠️ خطا توی فوروارد کردن آهنگِ کانال به ${targetId}:\n${e.message || e}`);
       }
     }
   }
 }
 
-// ── ساخت کپشن ────────────────────────────────────────────────
-
-function buildCaption(title, performer, kind) {
-  const tracks = "1";
+function buildCaption(title, performer) {
   return CAPTION_TEMPLATE.split("{title}")
     .join(title || "")
     .split("{performer}")
-    .join(performer || "")
-    .split("{tracks}")
-    .join(tracks);
+    .join(performer || "");
 }
 
 function stripExtension(fileName) {
@@ -903,6 +712,8 @@ async function answerCallbackQuery(env, callbackQueryId, text) {
   });
 }
 
+// کپشنِ یه پیام رو ویرایش می‌کنه. reply_markup رو هم صریحاً دوباره پاس
+// می‌دیم که دکمه‌ی شیشه‌ای زیر آهنگ حین این عملیات پاک نشه.
 async function editMessageCaption(env, chatId, messageId, caption, reply_markup) {
   const res = await fetch(`https://api.telegram.org/bot${env.POSTER_BOT_TOKEN}/editMessageCaption`, {
     method: "POST",
