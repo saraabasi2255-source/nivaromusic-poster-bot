@@ -420,7 +420,7 @@ async function publishVoiceToChannel(env, chatId, pending) {
     chat_id: channelId,
     voice: pending.file_id,
     reply_markup: {
-      inline_keyboard: [[{ text: "⬇️ دانلود آهنگ", url: pending.link }]],
+      inline_keyboard: [[{ text: "دانلود آهنگ", url: pending.link }]],
     },
   };
   if (pending.duration) body.duration = pending.duration;
