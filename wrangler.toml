@@ -19,6 +19,7 @@ database_id = "5fcbbe67-b9b1-411b-8a74-d10f96c887fc"
 # ── متغیرهای غیرمحرمانه ─────────────────────────────────────
 [vars]
 MAIN_BOT_USERNAME = "NivaroMusic_bot"
+CHANNEL_ID = -1003312274246
 # چنل‌ها رو تو wrangler.toml نمی‌ذاریم چون تو Secret داریم:
 # CHANNEL_ID
 # OWNER_ID
