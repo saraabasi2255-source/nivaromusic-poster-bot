@@ -16,7 +16,7 @@
 // حالت عادی نشون می‌ده.
 
 // 👇👇 کپشن دلخواهت (فرمت خودت) — {title} و {performer} خودکار جایگزین می‌شن.
-const CAPTION_TEMPLATE = `🎧NivaroMusic
+const CAPTION_TEMPLATE = `🎧 NivaroMusic
 
 ◈ ━━━━━━━━━━━━ ◈
 ◈ Track : {title}
@@ -25,7 +25,7 @@ const CAPTION_TEMPLATE = `🎧NivaroMusic
 
 ❝ Just close your eyes & feel it ❞
 
- 🆔@NivaroMusic`;
+ 🆔 @NivaroMusic`;
 
 const SEARCH_BUTTON_TEXT = "All Version";
 
@@ -374,7 +374,7 @@ async function sendVoiceFinalPreview(env, chatId, userId) {
     voice: pending.file_id,
     reply_markup: {
       inline_keyboard: [
-        [{ text: "⬇️ دانلود آهنگ", url: pending.link }],
+        [{ text: "دانلود آهنگ", url: pending.link }],
         [
           { text: "📤 ارسال به کانال", callback_data: `vpublish:${userId}` },
           { text: "❌ انصراف", callback_data: `pcancel:${userId}` },
